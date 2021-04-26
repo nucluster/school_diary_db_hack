@@ -1,54 +1,62 @@
-from datacenter.models import Chastisement, Mark, Schoolkid, Commendation, Lesson, Subject, Teacher
+from datacenter.models import Chastisement, Mark, Schoolkid, Commendation, Lesson, Subject
+from django.shortcuts import get_object_or_404
+from django.http import Http404
 from random import choice
 
 
+def get_obj_or_error(klass, *args, **kwargs):
+    try:
+        obj = get_object_or_404(klass, *args, **kwargs)
+    except Http404:
+        print(f'Объекта класса {klass} с заданными параметрами нет в базе данных.')
+        return None
+    except klass.MultipleObjectsReturned:
+        print(f'В базе данных найдено много объектов класса {klass} с заданными параметрами.')
+        return None
+    return obj
+
+
 def fix_marks(schoolkid_name):
-    schoolkid = Schoolkid.objects.filter(full_name__contains=schoolkid_name)
-    if len(schoolkid) == 1:
-        print('Исправлены оценки 2 и 3:', Mark.objects.filter(schoolkid=schoolkid[0], points__in=[2, 3]).update(points=choice([4,5])))
-    elif len(schoolkid) == 0:
-        print(f'Ученика с именем {schoolkid_name} нет в базе данных.')
-    else:
-        print(f'Найдено {len(schoolkid)} учеников с именем {schoolkid_name}:', *schoolkid, sep='\n')
+    schoolkid = get_obj_or_error(Schoolkid, full_name__contains=schoolkid_name)
+    if schoolkid:
+        total_fix_marks = Mark.objects.filter(schoolkid=schoolkid, points__in=[2, 3]).update(points=choice([4, 5]))
+        return f'Исправлены оценки 2 и 3 ученика {schoolkid.full_name} на 4 и 5 в количестве: {total_fix_marks}'
 
 
 def remove_chastisements(schoolkid_name):
-    schoolkid = Schoolkid.objects.filter(full_name__contains=schoolkid_name)
-    if len(schoolkid) == 1:
-        print('Удалены замечания:', Chastisement.objects.filter(schoolkid=schoolkid[0]).delete())
-    elif len(schoolkid) == 0:
-        print(f'Ученика с именем {schoolkid_name} нет в базе данных.')
-    else:
-        print(f'Найдено {len(schoolkid)} учеников с именем {schoolkid_name}:', *schoolkid, sep='\n')
+    schoolkid = get_obj_or_error(Schoolkid, full_name__contains=schoolkid_name)
+    if schoolkid:
+        total_removed_chastisements = Chastisement.objects.filter(schoolkid=schoolkid).delete()[0]
+        return f'Удалены замечания ученика {schoolkid.full_name} в количестве: {total_removed_chastisements}'
 
 
 def get_random_commendation_phrase():
-    with open('commendation_phrases.txt', 'rt') as f:
-        phrases = [line.rstrip('\n') for line in f]
+    with open('commendation_phrases.txt', 'rt', encoding='utf-8') as file:
+        phrases = file.read().splitlines()
     return choice(phrases)
 
 
 def create_commendation(schoolkid_name, subject_title, date):
-    schoolkid = Schoolkid.objects.filter(full_name__contains=schoolkid_name)
-    if len(schoolkid) == 0:
-        print(f'Ученика с именем {schoolkid_name} нет в базе данных.')
-    elif len(schoolkid) > 1:
-        print(f'Найдено {len(schoolkid)} учеников с именем {schoolkid_name}:', *schoolkid, sep='\n')
-    else:
-        subject = Subject.objects.filter(title__contains=subject_title, year_of_study=schoolkid[0].year_of_study)
-        if len(subject) == 0:
-            print(f'Предмета {subject_title} нет в базе данных или у данного ученика.')
-        elif len(subject) > 1:
-            print(f'Найдено {len(subject)} предметов с названием {subject_title}:', *subject, sep='\n')
-        else:
-            lesson = Lesson.objects.filter(date=date, subject=subject[0], year_of_study=schoolkid[0].year_of_study, group_letter=schoolkid[0].group_letter)
-            if len(lesson) == 0:
-                print(
-                    f'По предмету {subject[0].title} {subject[0].year_of_study} класс на дату: {date} у ученика {schoolkid[0].full_name} не было занятий')
-            else:
-                marks = Mark.objects.filter(created=date, schoolkid=schoolkid[0], subject=subject[0])
+    schoolkid = get_obj_or_error(Schoolkid, full_name__contains=schoolkid_name)
+    if schoolkid:
+        subject = get_obj_or_error(Subject, title__contains=subject_title, year_of_study=schoolkid.year_of_study)
+        if subject:
+            lesson = get_obj_or_error(
+                Lesson,
+                date=date,
+                subject=subject,
+                year_of_study=schoolkid.year_of_study,
+                group_letter=schoolkid.group_letter
+            )
+            if lesson:
+                marks = Mark.objects.filter(created=date, schoolkid=schoolkid, subject=subject)
                 if len(marks) >= 1:
-                    print(Commendation.objects.create(text=get_random_commendation_phrase(), created=date, schoolkid=schoolkid[0],
-                                                      subject=subject[0], teacher=lesson[0].teacher))
+                    return Commendation.objects.create(
+                        text=get_random_commendation_phrase(),
+                        created=date,
+                        schoolkid=schoolkid,
+                        subject=subject,
+                        teacher=lesson.teacher
+                    )
                 else:
                     print('Невозможно добавить похвалу, нет оценок')
